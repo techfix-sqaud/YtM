@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Downloader</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f0f0;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #fff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            text-align: center;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #4CAF50;
+        }
+        label {
+            font-size: 1.2em;
+            margin-bottom: 5px;
+            display: block;
+        }
+        input[type="text"], select {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 1em;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #ccc;
+        }
+        button[type="reset"] {
+            background-color: #f44336;
+            margin-left: 10px;
+        }
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        #message {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Download Video or Convert to MP3</h1>
+        <form id="downloadForm">
+            <label for="url">Enter Video URL:</label>
+            <input type="text" id="url" name="url" placeholder="Enter video URL" required>
+            <br><br>
+            
+            <label for="option">Select download format:</label>
+            <select name="option" id="option" required>
+                <option value="mp3">Download as MP3</option>
+                <option value="mp4">Download as MP4</option>
+            </select>
+            <br><br>
+            
+            <button type="submit" id="downloadButton">Download</button>
+            <button type="reset">Reset</button>
+        </form>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        $(document).ready(function(){
+            $('#downloadForm').on('submit', function(event){
+                event.preventDefault();
+                var url = $('#url').val();
+                var option = $('#option').val();
+
+                // Disable the button and change text to "Converting"
+                $('#downloadButton').text('Converting...').attr('disabled', true);
+                
+                // Send AJAX request to Flask
+                $.ajax({
+                    type: 'POST',
+                    url: '/download',
+                    data: $(this).serialize(),
+                    success: function(response) {
+                        if (response.status == 'success') {
+                            // Trigger download using file explorer or Finder
+                            var link = document.createElement('a');
+                            link.href = '/download_file?file=' + response.message;
+                            link.download = response.message.split('/').pop();  // Use filename from response
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+
+                            // Enable button again and reset form
+                            $('#downloadButton').text('Download').attr('disabled', false);
+                            $('#url').val('');  // Reset the URL field
+                        } else {
+                            $('#message').html('<p style="color: red;">Error: ' + response.message + '</p>');
+                            // Enable button again
+                            $('#downloadButton').text('Download').attr('disabled', false);
+                        }
+                    },
+                    error: function() {
+                        $('#message').html('<p style="color: red;">Something went wrong.</p>');
+                        // Enable button again
+                        $('#downloadButton').text('Download').attr('disabled', false);
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
