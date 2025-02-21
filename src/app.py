@@ -52,7 +52,7 @@ def download_as_mp4(url):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('/index.html')
 
 
 @app.route('/download', methods=['POST'])
