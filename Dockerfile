@@ -3,17 +3,23 @@ FROM python:3.9-slim
 # Set the working directory
 WORKDIR /app
 
-# Copy the requirements file
-COPY requirements.txt .
+# Install system dependencies (optional but recommended for SSL, etc.)
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
 
-# Install the required packages
+# Copy the requirements file and install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code
+# Copy the entire app code
 COPY src/ .
 
-# Expose the port the app runs on
+# Make sure Flask sees the right environment
+ENV FLASK_APP=app.py
+ENV FLASK_RUN_HOST=0.0.0.0
+ENV FLASK_RUN_PORT=5000
+
+# Expose the port
 EXPOSE 5000
 
-# Command to run the application
-CMD ["python", "app.py"]
+# Run the Flask app
+CMD ["flask", "run"]
