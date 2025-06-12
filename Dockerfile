@@ -1,25 +1,20 @@
 FROM python:3.9-slim
 
-# Set the working directory
 WORKDIR /app
 
-# Install system dependencies (optional but recommended for SSL, etc.)
-RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+# System packages for yt-dlp and ffmpeg (required for MP3 extraction)
+RUN apt-get update && \
+    apt-get install -y gcc libpq-dev ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire app code
-COPY src/ .
+COPY . .
 
-# Make sure Flask sees the right environment
-ENV FLASK_APP=app.py
-ENV FLASK_RUN_HOST=0.0.0.0
-ENV FLASK_RUN_PORT=5000
+ENV FLASK_APP=app/main.py
+ENV FLASK_ENV=production
 
-# Expose the port
 EXPOSE 5000
 
-# Run the Flask app
-CMD ["flask", "run"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app.main:app"]
