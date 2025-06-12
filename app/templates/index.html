@@ -186,13 +186,15 @@
   </main>
 
   <script>
+    // Dark mode logic remains unchanged
+
     function setMode(mode) {
       if (mode === 'dark') {
         document.body.classList.add('dark-mode');
-        $('#modeToggle').html('☀️');
+        $('#modeToggle').text('☀️');
       } else {
         document.body.classList.remove('dark-mode');
-        $('#modeToggle').html('🌙');
+        $('#modeToggle').text('🌙');
       }
       localStorage.setItem('theme', mode);
     }
@@ -207,39 +209,51 @@
 
       $('#downloadForm').submit(function (event) {
         event.preventDefault();
-        const url = $('#url').val();
+        $('#message').empty();
+
+        const url = $('#url').val().trim();
         const option = $('#option').val();
-        $('#message').html('');
+
+        if (!url) {
+          $('#message').html('<p style="color: red;">Please enter a valid URL.</p>');
+          return;
+        }
+
         $('#downloadButton').text('Processing...').attr('disabled', true);
 
         $.ajax({
           type: 'POST',
           url: '/download',
-          data: $(this).serialize(),
+          data: { url, option },
           success: function (response) {
-            $('#downloadButton').text('Download').attr('disabled', false);
-
             if (response.status === 'success') {
-              const file = encodeURIComponent(response.filename || response.message);
-              const link = document.createElement('a');
-              link.href = `/download_file?file=${file}`;
-              link.download = (response.filename || response.message).split('/').pop();
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
+              const file = encodeURIComponent(response.filename);
+              const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-              $('#message').html(`<p style="color: green;">Download started: ${response.filename || response.message}</p>`);
+              if (isMobile) {
+                // Mobile-friendly download
+                window.location.href = `/download_file?file=${file}`;
+              } else {
+                // Desktop download via temporary link
+                const link = document.createElement('a');
+                link.href = `/download_file?file=${file}`;
+                link.download = response.filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }
+
+              $('#message').html(`<p style="color: green;">✅ Download started: ${response.filename}</p>`);
               alert('✅ Your download has started!');
               $('#url').val('');
             } else {
               $('#message').html(`<p style="color: red;">Error: ${response.message}</p>`);
-              alert(`❌ Error: ${response.message}`);
             }
+            $('#downloadButton').text('Download').attr('disabled', false);
           },
           error: function () {
+            $('#message').html('<p style="color: red;">An unexpected error occurred.</p>');
             $('#downloadButton').text('Download').attr('disabled', false);
-            $('#message').html('<p style="color: red;">Unexpected error occurred. Try again.</p>');
-            alert('❌ An unexpected error occurred. Please try again.');
           }
         });
       });
