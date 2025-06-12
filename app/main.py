@@ -4,8 +4,9 @@ import os
 
 app = Flask(__name__)
 
-# Ensure the downloads directory exists
-DOWNLOAD_DIR = 'downloads'
+# Setup paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads')
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -18,16 +19,14 @@ def download_as_mp3(url):
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
+        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
     }
     try:
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             base_filename = ydl.prepare_filename(info).rsplit('.', 1)[0]
             mp3_filename = base_filename + '.mp3'
-            if os.path.exists(base_filename + '.webm') and not os.path.exists(mp3_filename):
-                os.rename(base_filename + '.webm', mp3_filename)
-            return mp3_filename
+            return os.path.basename(mp3_filename)  # return only filename
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -36,13 +35,14 @@ def download_as_mp3(url):
 def download_as_mp4(url):
     ydl_opts = {
         'format': 'bestvideo+bestaudio/best',
-        'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
+        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
         'merge_output_format': 'mp4'
     }
     try:
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            return ydl.prepare_filename(info)
+            filename = ydl.prepare_filename(info)
+            return os.path.basename(filename)  # return only filename
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -72,20 +72,27 @@ def download():
     if result.startswith("Error"):
         return jsonify({'status': 'error', 'message': result})
 
-    return jsonify({'status': 'success', 'message': result})
+    return jsonify({'status': 'success', 'filename': result})
 
 
 # Serve the downloaded file
 @app.route('/download_file', methods=['GET'])
 def send_converted_file():
-    file_path = request.args.get('file')
+    filename = request.args.get('file')
+    if not filename:
+        return jsonify({'status': 'error', 'message': 'No file specified'})
 
-    if not file_path or not os.path.exists(file_path):
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
+
+    if not os.path.exists(file_path):
         return jsonify({'status': 'error', 'message': 'File not found'})
 
+    # Determine mimetype based on file extension
+    mimetype = 'audio/mpeg' if filename.endswith('.mp3') else 'video/mp4'
+
     try:
-        response = send_file(file_path, as_attachment=True)
-        os.remove(file_path)  # Optional: delete after sending
+        response = send_file(file_path, as_attachment=True, mimetype=mimetype)
+        os.remove(file_path)  # Optional: cleanup after download
         return response
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
