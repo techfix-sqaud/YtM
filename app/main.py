@@ -1,123 +1,3 @@
-# from flask import Flask, render_template, request, send_file, jsonify
-# import yt_dlp as youtube_dl
-# import os
-# import re
-
-# app = Flask(__name__)
-
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads')
-# os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-
-# def sanitize_filename(name):
-#     # Basic sanitization: remove problematic chars
-#     return re.sub(r'[\\/*?:"<>|]', '', name)
-
-
-# def download_as_mp3(url):
-#     ydl_opts = {
-#         'format': 'bestaudio/best',
-#         'postprocessors': [{
-#             'key': 'FFmpegExtractAudio',
-#             'preferredcodec': 'mp3',
-#             'preferredquality': '192',
-#         }],
-#         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-#         'quiet': True,
-#         'no_warnings': True,
-#     }
-#     try:
-#         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-#             info = ydl.extract_info(url, download=True)
-#             title = sanitize_filename(info.get('title', 'download'))
-#             mp3_filename = os.path.join(DOWNLOAD_DIR, f"{title}.mp3")
-
-#             if not os.path.exists(mp3_filename):
-#                 # Sometimes the extractor may output other formats first, rename if needed
-#                 base_filename = os.path.join(DOWNLOAD_DIR, f"{title}")
-#                 for ext in ['webm', 'm4a', 'wav']:
-#                     possible_file = f"{base_filename}.{ext}"
-#                     if os.path.exists(possible_file):
-#                         os.rename(possible_file, mp3_filename)
-#                         break
-#             if os.path.exists(mp3_filename):
-#                 return mp3_filename
-#             else:
-#                 return None
-#     except Exception as e:
-#         return f"Error: {str(e)}"
-
-
-# def download_as_mp4(url):
-#     ydl_opts = {
-#         'format': 'bestvideo+bestaudio/best',
-#         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-#         'merge_output_format': 'mp4',
-#         'quiet': True,
-#         'no_warnings': True,
-#     }
-#     try:
-#         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-#             info = ydl.extract_info(url, download=True)
-#             title = sanitize_filename(info.get('title', 'download'))
-#             mp4_filename = os.path.join(DOWNLOAD_DIR, f"{title}.mp4")
-#             if os.path.exists(mp4_filename):
-#                 return mp4_filename
-#             else:
-#                 return None
-#     except Exception as e:
-#         return f"Error: {str(e)}"
-
-
-# @app.route('/')
-# def index():
-#     return render_template('index.html')
-
-
-# @app.route('/download', methods=['POST'])
-# def download():
-#     url = request.form.get('url')
-#     option = request.form.get('option')
-
-#     if not url or not option:
-#         return jsonify({'status': 'error', 'message': 'Missing URL or option'})
-
-#     if option == 'mp3':
-#         file_path = download_as_mp3(url)
-#     elif option == 'mp4':
-#         file_path = download_as_mp4(url)
-#     else:
-#         return jsonify({'status': 'error', 'message': 'Invalid option'})
-
-#     if not file_path:
-#         return jsonify({'status': 'error', 'message': 'Failed to download or convert file.'})
-#     if isinstance(file_path, str) and file_path.startswith("Error"):
-#         return jsonify({'status': 'error', 'message': file_path})
-
-#     filename = os.path.basename(file_path)
-#     return jsonify({'status': 'success', 'filename': filename})
-
-
-# @app.route('/download_file')
-# def download_file():
-#     filename = request.args.get('file')
-#     if not filename:
-#         return jsonify({'status': 'error', 'message': 'No file specified'})
-
-#     file_path = os.path.join(DOWNLOAD_DIR, filename)
-#     if not os.path.isfile(file_path):
-#         return jsonify({'status': 'error', 'message': 'File not found'})
-
-#     try:
-#         return send_file(file_path, as_attachment=True)
-#     except Exception as e:
-#         return jsonify({'status': 'error', 'message': str(e)})
-
-
-# if __name__ == '__main__':
-#     app.run(debug=True, port=5000)
-
 from flask import Flask, render_template, request, send_file, jsonify
 import yt_dlp as youtube_dl
 import os
@@ -136,7 +16,20 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 def sanitize_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', '', name)
+    """Sanitize filename by removing problematic characters and limiting length"""
+    # Remove problematic characters
+    sanitized = re.sub(r'[\\/*?:"<>|]', '', name)
+    # Replace multiple spaces with single space
+    sanitized = re.sub(r'\s+', ' ', sanitized)
+    # Remove leading/trailing whitespace
+    sanitized = sanitized.strip()
+    # Limit length to avoid filesystem issues
+    if len(sanitized) > 100:
+        sanitized = sanitized[:100]
+    # Ensure we have a valid filename
+    if not sanitized:
+        sanitized = 'download'
+    return sanitized
 
 
 def allowed_extension(ext):
@@ -158,13 +51,17 @@ def get_file_size_mb(file_path):
 
 
 def download_youtube(url, format_choice):
+    # Get files before download to compare later
+    files_before = set(os.listdir(DOWNLOAD_DIR)) if os.path.exists(
+        DOWNLOAD_DIR) else set()
+
     options = {
-        'quiet': True,
-        'no_warnings': True,
+        'quiet': False,  # Enable some output for debugging
+        'no_warnings': False,
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
         'extractaudio': False,
         'audioformat': 'mp3',
-        'ignoreerrors': True,
+        'ignoreerrors': False,
     }
 
     if format_choice == 'mp3':
@@ -215,6 +112,7 @@ def download_youtube(url, format_choice):
             # Extract info first to check duration and size estimates
             info = ydl.extract_info(url, download=False)
             duration = info.get('duration', 0)
+            original_title = info.get('title', 'download')
 
             # Check if video is too long for WhatsApp (30 minutes limit)
             if format_choice == 'mp4' and duration > 1800:  # 30 minutes
@@ -222,20 +120,55 @@ def download_youtube(url, format_choice):
 
             # Now download
             info = ydl.extract_info(url, download=True)
-            title = sanitize_filename(info.get('title', 'download'))
-            ext = 'mp3' if format_choice == 'mp3' else 'mp4'
-            final_path = os.path.join(DOWNLOAD_DIR, f"{title}.{ext}")
 
-            # Handle edge cases where yt_dlp outputs another format
-            if not os.path.exists(final_path):
-                base = os.path.join(DOWNLOAD_DIR, title)
-                for fallback_ext in ['webm', 'm4a', 'wav', 'mp4', 'mkv']:
-                    alt_file = f"{base}.{fallback_ext}"
-                    if os.path.exists(alt_file):
-                        os.rename(alt_file, final_path)
+            # Get files after download to see what was created
+            files_after = set(os.listdir(DOWNLOAD_DIR)) if os.path.exists(
+                DOWNLOAD_DIR) else set()
+            new_files = files_after - files_before
+
+            if not new_files:
+                return None, "No new files were created during download"
+
+            # Look for the target file
+            target_ext = 'mp3' if format_choice == 'mp3' else 'mp4'
+            final_path = None
+
+            # First, try to find exact match with sanitized title
+            sanitized_title = sanitize_filename(original_title)
+            expected_filename = f"{sanitized_title}.{target_ext}"
+            expected_path = os.path.join(DOWNLOAD_DIR, expected_filename)
+
+            if os.path.exists(expected_path):
+                final_path = expected_path
+            else:
+                # Search through new files for the target format
+                for filename in new_files:
+                    if filename.endswith(f'.{target_ext}'):
+                        final_path = os.path.join(DOWNLOAD_DIR, filename)
                         break
 
-            if os.path.exists(final_path):
+                # If no target format found, look for files to convert
+                if not final_path:
+                    conversion_exts = ['webm', 'm4a',
+                                       'wav', 'mp4', 'mkv', 'ogg']
+                    for filename in new_files:
+                        file_ext = filename.split('.')[-1].lower()
+                        if file_ext in conversion_exts:
+                            source_path = os.path.join(DOWNLOAD_DIR, filename)
+                            # Create target filename based on the actual downloaded file
+                            base_name = '.'.join(filename.split('.')[:-1])
+                            target_filename = f"{base_name}.{target_ext}"
+                            target_path = os.path.join(
+                                DOWNLOAD_DIR, target_filename)
+
+                            try:
+                                os.rename(source_path, target_path)
+                                final_path = target_path
+                                break
+                            except OSError:
+                                continue
+
+            if final_path and os.path.exists(final_path):
                 # Check file size for WhatsApp limits
                 file_size_mb = get_file_size_mb(final_path)
                 max_size = 16 if format_choice == 'mp4' else 100  # WhatsApp limits
@@ -245,9 +178,13 @@ def download_youtube(url, format_choice):
 
                 return final_path, None
             else:
-                return None, "File was not created."
+                # Debug information
+                available_files = list(new_files) if new_files else [
+                    "No new files"]
+                return None, f"File was not created in expected format. New files: {', '.join(available_files)}"
+
     except Exception as e:
-        return None, str(e)
+        return None, f"Download error: {str(e)}"
 
 # Routes
 
@@ -353,6 +290,34 @@ def file_info():
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to get file info: {e}'})
+
+
+@app.route('/debug/files')
+def debug_files():
+    """Debug route to list all files in downloads directory"""
+    try:
+        if not os.path.exists(DOWNLOAD_DIR):
+            return jsonify({'status': 'error', 'message': 'Downloads directory does not exist'})
+
+        files = []
+        for filename in os.listdir(DOWNLOAD_DIR):
+            file_path = os.path.join(DOWNLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                files.append({
+                    'name': filename,
+                    'size_bytes': file_size,
+                    'size_mb': round(file_size / (1024 * 1024), 2)
+                })
+
+        return jsonify({
+            'status': 'success',
+            'download_dir': DOWNLOAD_DIR,
+            'files': files,
+            'total_files': len(files)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
 
 
 if __name__ == '__main__':
