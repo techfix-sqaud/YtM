@@ -1,411 +1,64 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Video Downloader</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <style>
-    :root {
-      --light-bg: #f0f0f0;
-      --light-text: #333;
-      --light-box: #fff;
-      --light-accent: #4CAF50;
-      --light-hover: #45a049;
-      --light-reset: #f44336;
-
-      --dark-bg: #181818;
-      --dark-text: #f0f0f0;
-      --dark-box: #232323;
-      --dark-accent: #81c784;
-      --dark-hover: #388e3c;
-      --dark-reset: #e57373;
-    }
-
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background-color: var(--light-bg);
-      color: var(--light-text);
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      transition: background 0.3s, color 0.3s;
-    }
-
-    .overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0,0,0,0.5);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .spinner {
-      border: 6px solid #f3f3f3;
-      border-top: 6px solid var(--light-accent);
-      border-radius: 50%;
-      width: 50px;
-      height: 50px;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    .toast {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #333;
-      color: #fff;
-      padding: 10px 20px;
-      border-radius: 5px;
-      display: none;
-      z-index: 10000;
-    }
- header, footer {
-      padding: 15px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .toggle-group {
-      display: flex;
-      gap: 10px;
-    }
-
-    .mode-toggle, .lang-toggle {
-      background: none;
-      border: 1px solid #ccc;
-      border-radius: 20px;
-      padding: 6px 16px;
-      font-size: 1em;
-      cursor: pointer;
-      color: inherit;
-    }
-
-    main {
-      flex-grow: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-
-    .container {
-      max-width: 500px;
-      width: 100%;
-      background: var(--light-box);
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      text-align: center;
-    }
-
-    h1 { color: var(--light-accent); margin-bottom: 20px; }
-    label, #version { display: block; margin: 12px 0 5px; font-size: 1.1em; }
-    input[type="text"], select {
-      width: 90%; padding: 10px; font-size: 1em;
-      border: 1px solid #ccc; border-radius: 4px;
-      background: inherit; color: inherit;
-    }
-
-    button {
-      padding: 10px 20px; margin: 10px 5px 0;
-      font-size: 1em; border: none;
-      border-radius: 5px; color: #fff;
-      cursor: pointer;
-    }
-    button:disabled { background-color: #ccc; cursor: not-allowed; }
-    button[type="submit"] { background-color: var(--light-accent); }
-    button[type="submit"]:hover:not(:disabled) { background-color: var(--light-hover); }
-    button[type="reset"] { background-color: var(--light-reset); }
-    .ad-section, .donation-section, .feedback-link {
-      text-align: center; margin-top: 20px;
-    }
-    .feedback-link {
-        text-align: center;
-      display: inline-block; padding: 8px 18px;
-      background: #4CAF50; color: #fff;
-      border-radius: 20px; text-decoration: none;
-    }
-
-    .donation-section img { height: 45px; width: 162px; }
-
-    body.dark-mode {
-      background-color: var(--dark-bg);
-      color: var(--dark-text);
-    }
-    body.dark-mode .container { background-color: var(--dark-box); }
-    body.dark-mode h1 { color: var(--dark-accent); }
-    body.dark-mode input, body.dark-mode select {
-      background-color: #2c2c2c; border: 1px solid #444; color: var(--dark-text);
-    }
-    body.dark-mode button[type="submit"] { background-color: var(--dark-accent); }
-    body.dark-mode button[type="submit"]:hover { background-color: var(--dark-hover); }
-    body.dark-mode button[type="reset"] { background-color: var(--dark-reset); }
-    body.dark-mode .feedback-link { background: #81c784; color: #232323; }
-    /* Other existing styles preserved... */
-  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<div class="overlay" id="loadingOverlay" style="display:none; flex-direction:column; align-items:center; justify-content:center;">
+  <div class="overlay" id="loadingOverlay">
     <div class="spinner"></div>
-    <div id="loadingText" style="color:#fff; margin-top:18px; font-size:1.2em; font-weight:bold;"></div>
-</div>
-<div class="toast" id="toast"></div>
+    <div id="loadingText" style="color:white;margin-top:15px;font-weight:bold;"></div>
+  </div>
 
-<header>
-    <div style="margin: 0 auto; text-align: center; font-weight: bold; font-size: 1.1em;">
-        🇵🇸 Stands With Palestine 🇵🇸
-    </div>
-    <div class="toggle-group">
-        <button class="mode-toggle" id="modeToggle">🌙</button>
-        <button class="lang-toggle" id="langToggle">AR</button>
-    </div>
-</header>
+  <div class="toast" id="toast"></div>
 
-<main>
+  <header>
+    <div style="margin:auto;text-align:center;font-weight:bold;">Stand With Palestine 🇵🇸</div>
+    <div>
+      <button id="modeToggle">🌙</button>
+      <button id="langToggle">AR</button>
+    </div>
+  </header>
+
+  <main>
     <div class="container">
-        <h1 id="title">Download Video or Convert to MP3</h1>
-        <form id="downloadForm">
-            <label for="url" id="urlLabel">Enter Video URL:</label>
-            <input type="text" id="url" name="url" placeholder="Enter video URL" required />
+      <h1 id="title">Download Video or Convert to MP3</h1>
+      <form id="downloadForm">
+        <label id="urlLabel" for="url">Enter Video URL:</label>
+        <input type="text" id="url" placeholder="Enter video URL" required>
 
-            <label for="option" id="optionLabel">Select download format:</label>
-            <select name="option" id="option" required>
-                <option value="mp3" id="mp3Option">Download as MP3</option>
-                <option value="mp4" id="mp4Option">Download as MP4</option>
-            </select>
+        <label id="optionLabel" for="option">Select download format:</label>
+        <select id="option" required>
+          <option id="mp3Option" value="mp3">Download as MP3</option>
+          <option id="mp4Option" value="mp4">Download as MP4</option>
+        </select>
 
-            <button type="submit" id="downloadButton">Download</button>
-            <button type="reset" id="resetButton">Reset</button>
-        </form>
-        <div id="message"></div>
+        <button type="submit" class="submit" id="downloadButton">Download</button>
+        <button type="reset" class="reset" id="resetButton">Reset</button>
+      </form>
 
-        <div class="ad-section">
-            <p style="display: none;">Ad Space Placeholder</p>
-        </div>
+      <div class="donation-section">
+        <a href="https://ko-fi.com/valstine" target="_blank">
+          <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi">
+        </a>
+      </div>
 
-        <div class="donation-section">
-            <a href="https://ko-fi.com/valstine" target="_blank">
-                <img
-                    src="https://ko-fi.com/img/githubbutton_sm.svg"
-                    alt="Support me on Ko-fi"
-                    style="height: 45px; width: auto;"
-                />
-            </a>
-        </div>
+      <div id="qrContainer" style="display:none;">
+        <div id="qrMessage"></div>
+        <canvas id="qrCanvas"></canvas>
+      </div>
 
-        <div id="qrContainer" style="margin-top: 20px; display: none;">
-            <div id="qrMessage" style="margin-bottom: 8px; font-weight: bold;">
-            </div>
-            <div id="qrcode"></div>
-        </div>
-
-        <footer style="text-align: center; justify-content: center; display: flex;"></footer>
-            <a href="https://docs.google.com/forms/d/e/1FAIpQLSdzfjWbVTvP_KrOTxMLZrhQKTSmzuCU4Ta8Cgz5bcoOP5vMrQ/viewform?usp=dialog" target="_blank" class="feedback-link">💬 Leave Feedback</a>
-            <p>Created with <span style="color:#e25555;">&#10084;&#65039;</span> by <strong>Valstine</strong></p>
-            <div id="version">Version: <span id="verNum">v 0.0.0</span> <span id="verTag">Beta</span></div>
-        </footer>
+      <a href="https://docs.google.com/forms/d/e/1FAIpQLSdzfjWbVTvP_KrOTxMLZrhQKTSmzuCU4Ta8Cgz5bcoOP5vMrQ/viewform?usp=dialog" class="feedback-link" target="_blank">💬 Leave Feedback</a>
+      <p style="text-align:center;">Created with ❤️ by <strong>Valstine</strong></p>
+      <p id="version" style="text-align:center;">Version: <span id="verNum">v0.0.1 </span> <span id="verTag">Beta</span></p>
     </div>
-</main>
+  </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
-<script>
-    const translations = {
-        en: {
-            title: "Download Video or Convert to MP3",
-            urlLabel: "Enter Video URL:",
-            placeholder: "Enter video URL",
-            formatLabel: "Select download format:",
-            mp3: "Download as MP3",
-            mp4: "Download as MP4",
-            download: "Download",
-            reset: "Reset",
-            dark: "🌙",
-            light: "☀️",
-            langToggle: "AR",
-            success: "✅ Your download completed successfully!",
-            invalidUrl: "Please enter a valid URL.",
-            unexpected: "An unexpected error occurred.",
-            qrMessage: "Share this with a friend!",
-            loading: "Loading...",
-            converting: "Converting...",
-            downloading: "Downloading..."
-        },
-        ar: {
-            title: "تحميل الفيديو أو تحويله إلى MP3",
-            urlLabel: "أدخل رابط الفيديو:",
-            placeholder: "أدخل رابط الفيديو",
-            formatLabel: "اختر صيغة التحميل:",
-            mp3: "تحميل MP3",
-            mp4: "تحميل MP4",
-            download: "تحميل",
-            reset: "إعادة تعيين",
-            dark: "🌙 ",
-            light: "☀️",
-            langToggle: "EN",
-            success: "✅ بدأ التحميل!",
-            invalidUrl: "يرجى إدخال رابط صحيح.",
-            unexpected: "حدث خطأ غير متوقع.",
-            qrMessage: "شارك هذا الرابط مع صديق!",
-            loading: "جارٍ التحميل...",
-            converting: "جارٍ التحويل...",
-            downloading: "جارٍ التنزيل..."
-        }
-    };
-
-    function showToast(msg) {
-        $('#toast').text(msg).fadeIn(200).delay(2500).fadeOut(300);
-    }
-
-    function setLoadingText(type) {
-        const lang = localStorage.getItem('lang') || 'en';
-        const t = translations[lang];
-        let text = t.loading;
-        if (type === 'converting') text = t.converting;
-        else if (type === 'downloading') text = t.downloading;
-        $('#loadingText').text(text);
-    }
-
-    function toggleOverlay(show, type = 'loading') {
-        setLoadingText(type);
-        $('#loadingOverlay').css('display', show ? 'flex' : 'none');
-    }
-
-    function setMode(mode) {
-        document.body.classList.toggle('dark-mode', mode === 'dark');
-        localStorage.setItem('theme', mode);
-        updateText();
-    }
-    function getQrMessage() {
-    const lang = localStorage.getItem('lang') || 'en';
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-        return translations[lang]?.qrMessage || "Share this with a friend!";
-    } else {
-        return lang === 'ar' ? "نزّل هذا على هاتفك المحمول" : "Download this on mobile";
-    }
-}
-
-function updateText() {
-    const lang = localStorage.getItem('lang') || 'en';
-    const t = translations[lang];
-    $('#title').text(t.title);
-    $('#urlLabel').text(t.urlLabel);
-    $('#url').attr('placeholder', t.placeholder);
-    $('#optionLabel').text(t.formatLabel);
-    $('#mp3Option').text(t.mp3);
-    $('#mp4Option').text(t.mp4);
-    $('#downloadButton').text(t.download);
-    $('#resetButton').text(t.reset);
-    $('#modeToggle').text(document.body.classList.contains('dark-mode') ? t.light : t.dark);
-    $('#langToggle').text(t.langToggle);
-    $('html').attr('dir', lang === 'ar' ? 'rtl' : 'ltr');
-    $('#qrMessage').text(getQrMessage());
-}
-
-
-    function setLanguage(lang) {
-        localStorage.setItem('lang', lang);
-        updateText();
-    }
-
-    function generateQRCode(text) {
-        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return;
-        $('#qrContainer').show();
-        // Clear previous QR code
-        $('#qrcode').empty();
-        // Create a new canvas element for QRious
-        const canvas = document.createElement('canvas');
-        canvas.id = 'qrCanvas';
-        document.getElementById('qrcode').appendChild(canvas);
-        new QRious({ element: canvas, value: text, size: 150 });
-    }
-
-    $(document).ready(function () {
-        setMode(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-        setLanguage(localStorage.getItem('lang') || 'en');
-
-        $('#modeToggle').click(() => setMode(document.body.classList.contains('dark-mode') ? 'light' : 'dark'));
-        $('#langToggle').click(() => setLanguage(localStorage.getItem('lang') === 'en' ? 'ar' : 'en'));
-
-        $('#downloadForm').submit(function (event) {
-            event.preventDefault();
-            $('#message').empty();
-
-            const url = $('#url').val().trim();
-            const option = $('#option').val();
-            const t = translations[localStorage.getItem('lang') || 'en'];
-
-            if (!url) {
-                showToast(t.invalidUrl);
-                return;
-            }
-
-            // Show appropriate loading text
-            if (option === 'mp3') {
-                toggleOverlay(true, 'converting');
-            } else if (option === 'mp4') {
-                toggleOverlay(true, 'downloading');
-            } else {
-                toggleOverlay(true, 'loading');
-            }
-
-            $.ajax({
-                type: 'POST',
-                url: '/download',
-                data: { url, option },
-                success: function (response) {
-                    toggleOverlay(false);
-                    if (response.status === 'success') {
-                        const file = encodeURIComponent(response.filename);
-                        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-                        const link = document.createElement('a');
-                        link.href = `/download_file?file=${file}`;
-                        link.download = response.filename;
-                        if (!isMobile) {
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                        } else {
-                            window.location.href = link.href;
-                        }
-                        showToast(`${t.success} (${response.filename})`);
-                        $('#url').val('');
-                        generateQRCode(link.href);
-                    } else {
-                        showToast(`Error: ${response.message}`);
-                    }
-                },
-                error: function () {
-                    toggleOverlay(false);
-                    showToast(t.unexpected);
-                }
-            });
-        });
-
-        $('#resetButton, #url, #option').on('click input change', function () {
-            $('#message').empty();
-            $('#qrContainer').hide();
-        });
-
-        fetch('/version')
-            .then(res => res.json())
-            .then(data => {
-                $('#verNum').text(data.version);
-                $('#verTag').text(data.beta ? 'Beta' : '');
-            });
-    });
-</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script> 
+</body>
 </html>
