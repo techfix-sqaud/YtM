@@ -4,8 +4,8 @@ const translations = {
     urlLabel: "Enter Video URL:",
     placeholder: "Enter video URL",
     formatLabel: "Select download format:",
-    mp3: "Download as MP3 (WhatsApp Ready)",
-    mp4: "Download as MP4 (WhatsApp Ready)",
+    mp3: "Download as MP3",
+    mp4: "Download as MP4",
     download: "Download",
     reset: "Reset",
     dark: "🌙",
@@ -16,16 +16,16 @@ const translations = {
     unexpected: "An unexpected error occurred.",
     qrMessage: "Share this with a friend!",
     loading: "Loading...",
-    converting: "Converting to WhatsApp-compatible MP3...",
-    downloading: "Downloading WhatsApp-compatible MP4...",
+    converting: "Converting MP3...",
+    downloading: "Downloading MP4...",
   },
   ar: {
     title: "تحميل الفيديو أو تحويله إلى MP3",
     urlLabel: "أدخل رابط الفيديو:",
     placeholder: "أدخل رابط الفيديو",
     formatLabel: "اختر صيغة التحميل:",
-    mp3: "تحميل MP3 (جاهز للواتساب)",
-    mp4: "تحميل MP4 (جاهز للواتساب)",
+    mp3: "تحميل MP3",
+    mp4: "تحميل MP4",
     download: "تحميل",
     reset: "إعادة تعيين",
     dark: "🌙 ",
@@ -124,11 +124,12 @@ function generateQRCode(text) {
 }
 
 function handleDownloadSuccess(response, t) {
-  const file = encodeURIComponent(response.filename);
-  const downloadUrl = `/download_file?file=${file}`;
+  const file = response.filename;
+  // Use proper URL encoding for the filename parameter
+  const downloadUrl = `/download_file?file=${encodeURIComponent(file)}`;
 
   // Get file info for better user feedback
-  fetch(`/file_info?file=${file}`)
+  fetch(`/file_info?file=${encodeURIComponent(file)}`)
     .then((res) => res.json())
     .then((fileInfo) => {
       if (fileInfo.status === "success") {
@@ -139,30 +140,39 @@ function handleDownloadSuccess(response, t) {
         showToast(
           `${t.success} (${response.filename}, ${sizeText}, ${compatText})`
         );
+      } else if (fileInfo.debug_info) {
+        // If file not found, try to find it using the find_file endpoint
+        console.log("File not found, trying to find it:", fileInfo.debug_info);
+        tryFindAndDownload(file, t);
+        return;
       }
     })
-    .catch(() => {
-      showToast(`${t.success} (${response.filename})`);
+    .catch((error) => {
+      console.log("Error getting file info, trying to find file:", error);
+      tryFindAndDownload(file, t);
+      return;
     });
 
   // Handle download based on device type
   if (isMobile()) {
-    // For mobile, direct navigation works better
+    // For mobile, use a more reliable approach
     const link = document.createElement("a");
     link.href = downloadUrl;
+    link.download = response.filename;
     link.style.display = "none";
     document.body.appendChild(link);
+
+    // Add error handling for mobile downloads
+    link.addEventListener("error", function () {
+      console.log("Download link failed, trying to find file");
+      tryFindAndDownload(file, t);
+    });
 
     // Trigger download
     setTimeout(() => {
       link.click();
       document.body.removeChild(link);
     }, 100);
-
-    // Also try window.location as backup
-    setTimeout(() => {
-      window.location.href = downloadUrl;
-    }, 500);
   } else {
     // For desktop, programmatic download
     const link = document.createElement("a");
@@ -176,6 +186,44 @@ function handleDownloadSuccess(response, t) {
 
   $("#url").val("");
   generateQRCode(downloadUrl);
+}
+
+function tryFindAndDownload(originalFilename, t) {
+  // Try to find the file using the find_file endpoint
+  fetch(`/find_file?name=${encodeURIComponent(originalFilename)}`)
+    .then((res) => res.json())
+    .then((findResult) => {
+      if (findResult.status === "success") {
+        const actualFilename = findResult.filename;
+        const newDownloadUrl = `/download_file?file=${encodeURIComponent(
+          actualFilename
+        )}`;
+
+        showToast(`${t.success} (${actualFilename})`);
+
+        if (isMobile()) {
+          // For mobile, try direct navigation
+          window.location.href = newDownloadUrl;
+        } else {
+          // For desktop, programmatic download
+          const link = document.createElement("a");
+          link.href = newDownloadUrl;
+          link.download = actualFilename;
+          link.style.display = "none";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        generateQRCode(newDownloadUrl);
+      } else {
+        showToast(`Error: File not found - ${findResult.message}`);
+      }
+    })
+    .catch((error) => {
+      console.log("Error finding file:", error);
+      showToast(`Error: Could not locate downloaded file`);
+    });
 }
 
 $(document).ready(function () {

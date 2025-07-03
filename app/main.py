@@ -3,6 +3,7 @@ import yt_dlp as youtube_dl
 import os
 import re
 import mimetypes
+import urllib.parse
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -17,17 +18,26 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 def sanitize_filename(name):
     """Sanitize filename by removing problematic characters and limiting length"""
-    # Remove problematic characters
+    # First decode any URL encoding that might be present
+    name = urllib.parse.unquote(name)
+
+    # Remove problematic characters for filesystem
     sanitized = re.sub(r'[\\/*?:"<>|]', '', name)
     # Replace multiple spaces with single space
     sanitized = re.sub(r'\s+', ' ', sanitized)
     # Remove leading/trailing whitespace
     sanitized = sanitized.strip()
+    # Remove or replace other problematic characters
+    sanitized = sanitized.replace('&', 'and')
+    sanitized = re.sub(r'[^\w\s\-_\.]', '', sanitized)
     # Limit length to avoid filesystem issues
     if len(sanitized) > 100:
-        sanitized = sanitized[:100]
+        # Keep the extension intact
+        name_part, ext = os.path.splitext(sanitized)
+        max_name_length = 100 - len(ext)
+        sanitized = name_part[:max_name_length] + ext
     # Ensure we have a valid filename
-    if not sanitized:
+    if not sanitized or sanitized == '.':
         sanitized = 'download'
     return sanitized
 
@@ -216,11 +226,40 @@ def download_file():
     if not filename:
         return jsonify({'status': 'error', 'message': 'No file specified'})
 
-    safe_filename = secure_filename(filename)
-    file_path = os.path.join(DOWNLOAD_DIR, safe_filename)
+    # First try the exact filename as provided
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
 
+    # If not found, try with secure_filename processing
     if not os.path.exists(file_path):
-        return jsonify({'status': 'error', 'message': 'File not found'})
+        safe_filename = secure_filename(filename)
+        file_path = os.path.join(DOWNLOAD_DIR, safe_filename)
+
+        # If still not found, try to find the file by searching in directory
+        if not os.path.exists(file_path):
+            # Search for files that contain the base name (without extension)
+            base_name = os.path.splitext(filename)[0]
+            extension = os.path.splitext(filename)[1]
+
+            for file in os.listdir(DOWNLOAD_DIR):
+                if base_name.lower() in file.lower() and file.endswith(extension):
+                    file_path = os.path.join(DOWNLOAD_DIR, file)
+                    filename = file  # Update filename to the actual file found
+                    break
+
+            if not os.path.exists(file_path):
+                # List available files for debugging
+                available_files = [f for f in os.listdir(
+                    DOWNLOAD_DIR) if os.path.isfile(os.path.join(DOWNLOAD_DIR, f))]
+                return jsonify({
+                    'status': 'error',
+                    'message': f'File not found: {filename}',
+                    'debug_info': {
+                        'requested_file': filename,
+                        'search_path': file_path,
+                        # Limit to first 10 files
+                        'available_files': available_files[:10]
+                    }
+                })
 
     # Get file extension and set appropriate MIME type
     file_ext = os.path.splitext(safe_filename)[1].lower()
@@ -238,15 +277,22 @@ def download_file():
         is_mobile = any(device in user_agent for device in [
                         'android', 'iphone', 'ipad', 'mobile'])
 
+        # Log the download attempt for debugging
+        print(
+            f"Download attempt - Original filename: {request.args.get('file')}")
+        print(f"Actual file path: {file_path}")
+        print(f"File exists: {os.path.exists(file_path)}")
+        print(f"Is mobile: {is_mobile}")
+
         response = send_file(
             file_path,
             mimetype=mime_type,
             as_attachment=True,
-            download_name=safe_filename
+            download_name=filename  # Use the actual filename found
         )
 
         # Set additional headers for better mobile compatibility
-        response.headers['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
         response.headers['Content-Type'] = mime_type
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
@@ -255,10 +301,12 @@ def download_file():
         # For mobile browsers, set additional headers
         if is_mobile:
             response.headers['Content-Transfer-Encoding'] = 'binary'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
 
         return response
 
     except Exception as e:
+        print(f"Error sending file: {e}")
         return jsonify({'status': 'error', 'message': f'Failed to send file: {e}'})
 
 
@@ -269,20 +317,37 @@ def file_info():
     if not filename:
         return jsonify({'status': 'error', 'message': 'No file specified'})
 
-    safe_filename = secure_filename(filename)
-    file_path = os.path.join(DOWNLOAD_DIR, safe_filename)
+    # First try the exact filename as provided
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
 
+    # If not found, try with secure_filename processing
     if not os.path.exists(file_path):
-        return jsonify({'status': 'error', 'message': 'File not found'})
+        safe_filename = secure_filename(filename)
+        file_path = os.path.join(DOWNLOAD_DIR, safe_filename)
+        filename = safe_filename
+
+        # If still not found, try to find the file by searching in directory
+        if not os.path.exists(file_path):
+            base_name = os.path.splitext(filename)[0]
+            extension = os.path.splitext(filename)[1]
+
+            for file in os.listdir(DOWNLOAD_DIR):
+                if base_name.lower() in file.lower() and file.endswith(extension):
+                    file_path = os.path.join(DOWNLOAD_DIR, file)
+                    filename = file
+                    break
+
+            if not os.path.exists(file_path):
+                return jsonify({'status': 'error', 'message': 'File not found'})
 
     try:
         file_size = os.path.getsize(file_path)
         file_size_mb = file_size / (1024 * 1024)
-        file_ext = os.path.splitext(safe_filename)[1].lower()
+        file_ext = os.path.splitext(filename)[1].lower()
 
         return jsonify({
             'status': 'success',
-            'filename': safe_filename,
+            'filename': filename,
             'size_bytes': file_size,
             'size_mb': round(file_size_mb, 2),
             'extension': file_ext,
@@ -316,6 +381,54 @@ def debug_files():
             'files': files,
             'total_files': len(files)
         })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@app.route('/find_file')
+def find_file():
+    """Find a file by partial name match - useful when exact filename matching fails"""
+    search_term = request.args.get('name')
+    if not search_term:
+        return jsonify({'status': 'error', 'message': 'No search term provided'})
+
+    try:
+        if not os.path.exists(DOWNLOAD_DIR):
+            return jsonify({'status': 'error', 'message': 'Downloads directory does not exist'})
+
+        # Remove file extension for searching
+        search_base = os.path.splitext(search_term)[0].lower()
+        search_ext = os.path.splitext(search_term)[1].lower()
+
+        matches = []
+        for filename in os.listdir(DOWNLOAD_DIR):
+            file_path = os.path.join(DOWNLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                file_base = os.path.splitext(filename)[0].lower()
+                file_ext = os.path.splitext(filename)[1].lower()
+
+                # Match if base name contains search term and extension matches
+                if search_base in file_base and (not search_ext or file_ext == search_ext):
+                    file_size = os.path.getsize(file_path)
+                    matches.append({
+                        'filename': filename,
+                        'size_mb': round(file_size / (1024 * 1024), 2),
+                        'extension': file_ext
+                    })
+
+        if matches:
+            # Return the best match (first one found)
+            return jsonify({
+                'status': 'success',
+                'filename': matches[0]['filename'],
+                'all_matches': matches
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'No files found matching: {search_term}'
+            })
+
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
