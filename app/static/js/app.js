@@ -113,117 +113,51 @@ function setLanguage(lang) {
   updateText();
 }
 
-function generateQRCode(text) {
+function generateQRCode(downloadUrl) {
   if (isMobile()) return;
+
   $("#qrContainer").show();
-  $("#qrcode").empty();
-  const canvas = document.createElement("canvas");
-  canvas.id = "qrCanvas";
-  document.getElementById("qrcode").appendChild(canvas);
-  new QRious({ element: canvas, value: text, size: 150 });
+  const canvas = document.getElementById("qrCanvas");
+  if (canvas) {
+    // Generate absolute URL for QR code
+    const absoluteUrl = window.location.origin + downloadUrl;
+    new QRious({
+      element: canvas,
+      value: absoluteUrl,
+      size: 150,
+    });
+  }
 }
 
 function handleDownloadSuccess(response, t) {
-  const file = response.filename;
-  // Use proper URL encoding for the filename parameter
-  const downloadUrl = `/download_file?file=${encodeURIComponent(file)}`;
+  const filename = response.filename;
+  const downloadUrl = `/download_file?file=${encodeURIComponent(filename)}`;
 
-  // Get file info for better user feedback
-  fetch(`/file_info?file=${encodeURIComponent(file)}`)
-    .then((res) => res.json())
-    .then((fileInfo) => {
-      if (fileInfo.status === "success") {
-        const sizeText = `${fileInfo.size_mb}MB`;
-        const compatText = fileInfo.whatsapp_compatible
-          ? "✅ WhatsApp compatible"
-          : "⚠️ May be too large for WhatsApp";
-        showToast(
-          `${t.success} (${response.filename}, ${sizeText}, ${compatText})`
-        );
-      } else if (fileInfo.debug_info) {
-        // If file not found, try to find it using the find_file endpoint
-        console.log("File not found, trying to find it:", fileInfo.debug_info);
-        tryFindAndDownload(file, t);
-        return;
-      }
-    })
-    .catch((error) => {
-      console.log("Error getting file info, trying to find file:", error);
-      tryFindAndDownload(file, t);
-      return;
-    });
+  // Show success message
+  showToast(`${t.success} (${filename})`);
 
   // Handle download based on device type
   if (isMobile()) {
-    // For mobile, use a more reliable approach
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = response.filename;
-    link.style.display = "none";
-    document.body.appendChild(link);
-
-    // Add error handling for mobile downloads
-    link.addEventListener("error", function () {
-      console.log("Download link failed, trying to find file");
-      tryFindAndDownload(file, t);
-    });
-
-    // Trigger download
+    // For mobile, use direct navigation which works more reliably
     setTimeout(() => {
-      link.click();
-      document.body.removeChild(link);
-    }, 100);
+      window.location.href = downloadUrl;
+    }, 500);
   } else {
-    // For desktop, programmatic download
+    // For desktop, use programmatic download
     const link = document.createElement("a");
     link.href = downloadUrl;
-    link.download = response.filename;
+    link.download = filename;
     link.style.display = "none";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   }
 
+  // Clear the URL input
   $("#url").val("");
+
+  // Generate QR code for easy sharing
   generateQRCode(downloadUrl);
-}
-
-function tryFindAndDownload(originalFilename, t) {
-  // Try to find the file using the find_file endpoint
-  fetch(`/find_file?name=${encodeURIComponent(originalFilename)}`)
-    .then((res) => res.json())
-    .then((findResult) => {
-      if (findResult.status === "success") {
-        const actualFilename = findResult.filename;
-        const newDownloadUrl = `/download_file?file=${encodeURIComponent(
-          actualFilename
-        )}`;
-
-        showToast(`${t.success} (${actualFilename})`);
-
-        if (isMobile()) {
-          // For mobile, try direct navigation
-          window.location.href = newDownloadUrl;
-        } else {
-          // For desktop, programmatic download
-          const link = document.createElement("a");
-          link.href = newDownloadUrl;
-          link.download = actualFilename;
-          link.style.display = "none";
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }
-
-        generateQRCode(newDownloadUrl);
-      } else {
-        showToast(`Error: File not found - ${findResult.message}`);
-      }
-    })
-    .catch((error) => {
-      console.log("Error finding file:", error);
-      showToast(`Error: Could not locate downloaded file`);
-    });
 }
 
 $(document).ready(function () {
@@ -269,9 +203,13 @@ $(document).ready(function () {
           showToast(`Error: ${response.message}`);
         }
       },
-      error: function () {
+      error: function (xhr, status, error) {
         toggleOverlay(false);
-        showToast(t.unexpected);
+        if (xhr.responseJSON && xhr.responseJSON.message) {
+          showToast(`Error: ${xhr.responseJSON.message}`);
+        } else {
+          showToast(t.unexpected);
+        }
       },
     });
   });
@@ -280,11 +218,4 @@ $(document).ready(function () {
     $("#message").empty();
     $("#qrContainer").hide();
   });
-
-  fetch("/version")
-    .then((res) => res.json())
-    .then((data) => {
-      $("#verNum").text(data.version);
-      $("#verTag").text(data.beta ? "Beta" : "");
-    });
 });
