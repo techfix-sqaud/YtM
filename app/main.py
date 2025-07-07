@@ -5,6 +5,10 @@ import re
 import mimetypes
 import urllib.parse
 from werkzeug.utils import secure_filename
+import uuid
+import time
+import threading
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -61,140 +65,148 @@ def get_file_size_mb(file_path):
 
 
 def download_youtube(url, format_choice):
-    # Get files before download to compare later
-    files_before = set(os.listdir(DOWNLOAD_DIR)) if os.path.exists(
-        DOWNLOAD_DIR) else set()
+    """Download YouTube video/audio with simplified, mobile-friendly approach"""
 
-    options = {
-        'quiet': False,  # Enable some output for debugging
-        'no_warnings': False,
-        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-        'extractaudio': False,
-        'audioformat': 'mp3',
+    # Generate unique filename to avoid conflicts
+    unique_id = str(uuid.uuid4())[:8]
+    timestamp = int(time.time())
+
+    # Simple filename template
+    if format_choice == 'mp3':
+        filename_template = f"audio_{timestamp}_{unique_id}.%(ext)s"
+    else:
+        filename_template = f"video_{timestamp}_{unique_id}.%(ext)s"
+
+    output_path = os.path.join(DOWNLOAD_DIR, filename_template)
+
+    # Simplified options for better compatibility
+    base_options = {
+        'quiet': True,
+        'no_warnings': True,
+        'outtmpl': output_path,
         'ignoreerrors': False,
+        'extractaudio': format_choice == 'mp3',
+        'audioformat': 'mp3' if format_choice == 'mp3' else None,
     }
 
     if format_choice == 'mp3':
-        options.update({
-            'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+        base_options.update({
+            'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '128',  # Lower bitrate for WhatsApp compatibility
-            }, {
-                'key': 'FFmpegMetadata',
-                'add_metadata': True,
+                'preferredquality': '128',
             }],
-            'postprocessor_args': [
-                '-ar', '44100',  # Standard sample rate
-                '-ac', '2',      # Stereo
-                '-b:a', '128k',  # Consistent bitrate
-            ],
         })
     elif format_choice == 'mp4':
-        options.update({
+        base_options.update({
             'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
             'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }, {
-                'key': 'FFmpegMetadata',
-                'add_metadata': True,
-            }],
-            'postprocessor_args': [
-                '-c:v', 'libx264',           # H.264 codec for WhatsApp compatibility
-                '-preset', 'medium',          # Balance between speed and compression
-                '-crf', '23',                # Good quality compression
-                '-c:a', 'aac',               # AAC audio codec
-                '-b:a', '128k',              # Audio bitrate
-                '-movflags', '+faststart',    # Enable fast start for web playback
-                '-pix_fmt', 'yuv420p',       # Pixel format for compatibility
-                '-maxrate', '1000k',         # Max bitrate to keep file size reasonable
-                '-bufsize', '2000k',         # Buffer size
-            ],
         })
     else:
         return None, "Invalid format choice"
 
     try:
-        with youtube_dl.YoutubeDL(options) as ydl:
-            # Extract info first to check duration and size estimates
+        with youtube_dl.YoutubeDL(base_options) as ydl:
+            # Extract info first
             info = ydl.extract_info(url, download=False)
             duration = info.get('duration', 0)
-            original_title = info.get('title', 'download')
+            title = info.get('title', 'download')
 
-            # Check if video is too long for WhatsApp (30 minutes limit)
-            if format_choice == 'mp4' and duration > 1800:  # 30 minutes
-                return None, "Video is too long for WhatsApp sharing (max 30 minutes)"
+            # Check duration limits
+            if format_choice == 'mp4' and duration and duration > 5400:  # 90 minutes like ytmp3.cc
+                return None, "Video is too long (max 90 minutes)"
 
-            # Now download
-            info = ydl.extract_info(url, download=True)
+            # Download the file
+            ydl.download([url])
 
-            # Get files after download to see what was created
-            files_after = set(os.listdir(DOWNLOAD_DIR)) if os.path.exists(
-                DOWNLOAD_DIR) else set()
-            new_files = files_after - files_before
-
-            if not new_files:
-                return None, "No new files were created during download"
-
-            # Look for the target file
+            # Find the downloaded file
             target_ext = 'mp3' if format_choice == 'mp3' else 'mp4'
-            final_path = None
 
-            # First, try to find exact match with sanitized title
-            sanitized_title = sanitize_filename(original_title)
-            expected_filename = f"{sanitized_title}.{target_ext}"
-            expected_path = os.path.join(DOWNLOAD_DIR, expected_filename)
+            # Look for files that match our pattern
+            for filename in os.listdir(DOWNLOAD_DIR):
+                if filename.startswith(f"{'audio' if format_choice == 'mp3' else 'video'}_{timestamp}_{unique_id}"):
+                    file_path = os.path.join(DOWNLOAD_DIR, filename)
+                    if os.path.exists(file_path):
+                        # Check file size
+                        file_size_mb = get_file_size_mb(file_path)
+                        max_size = 16 if format_choice == 'mp4' else 100
 
-            if os.path.exists(expected_path):
-                final_path = expected_path
-            else:
-                # Search through new files for the target format
-                for filename in new_files:
-                    if filename.endswith(f'.{target_ext}'):
-                        final_path = os.path.join(DOWNLOAD_DIR, filename)
-                        break
+                        if file_size_mb > max_size:
+                            os.remove(file_path)  # Clean up large file
+                            return None, f"File too large ({file_size_mb:.1f}MB). Max: {max_size}MB for {format_choice.upper()}"
 
-                # If no target format found, look for files to convert
-                if not final_path:
-                    conversion_exts = ['webm', 'm4a',
-                                       'wav', 'mp4', 'mkv', 'ogg']
-                    for filename in new_files:
-                        file_ext = filename.split('.')[-1].lower()
-                        if file_ext in conversion_exts:
-                            source_path = os.path.join(DOWNLOAD_DIR, filename)
-                            # Create target filename based on the actual downloaded file
-                            base_name = '.'.join(filename.split('.')[:-1])
-                            target_filename = f"{base_name}.{target_ext}"
-                            target_path = os.path.join(
-                                DOWNLOAD_DIR, target_filename)
+                        # Rename to clean filename
+                        clean_title = sanitize_filename(
+                            title)[:50]  # Limit length
+                        final_filename = f"{clean_title}.{target_ext}"
+                        final_path = os.path.join(DOWNLOAD_DIR, final_filename)
 
-                            try:
-                                os.rename(source_path, target_path)
-                                final_path = target_path
-                                break
-                            except OSError:
-                                continue
+                        # Handle duplicate filenames
+                        counter = 1
+                        while os.path.exists(final_path):
+                            name_part = f"{clean_title}_{counter}"
+                            final_filename = f"{name_part}.{target_ext}"
+                            final_path = os.path.join(
+                                DOWNLOAD_DIR, final_filename)
+                            counter += 1
 
-            if final_path and os.path.exists(final_path):
-                # Check file size for WhatsApp limits
-                file_size_mb = get_file_size_mb(final_path)
-                max_size = 16 if format_choice == 'mp4' else 100  # WhatsApp limits
+                        os.rename(file_path, final_path)
+                        return final_path, None
 
-                if file_size_mb > max_size:
-                    return None, f"File too large ({file_size_mb:.1f}MB). WhatsApp limit: {max_size}MB for {format_choice.upper()}"
-
-                return final_path, None
-            else:
-                # Debug information
-                available_files = list(new_files) if new_files else [
-                    "No new files"]
-                return None, f"File was not created in expected format. New files: {', '.join(available_files)}"
+            return None, "Download failed - no output file found"
 
     except Exception as e:
         return None, f"Download error: {str(e)}"
+
+
+def cleanup_old_files():
+    """Remove files older than 1 hour to prevent disk space issues"""
+    try:
+        if not os.path.exists(DOWNLOAD_DIR):
+            return
+
+        current_time = time.time()
+        for filename in os.listdir(DOWNLOAD_DIR):
+            file_path = os.path.join(DOWNLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                file_age = current_time - os.path.getmtime(file_path)
+                if file_age > 3600:  # 1 hour in seconds
+                    try:
+                        os.remove(file_path)
+                        print(f"Cleaned up old file: {filename}")
+                    except OSError:
+                        pass
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
+
+def start_cleanup_timer():
+    """Start periodic cleanup every 30 minutes"""
+    cleanup_old_files()
+    threading.Timer(1800, start_cleanup_timer).start()  # 30 minutes
+
+
+# Start cleanup timer when app starts
+start_cleanup_timer()
+
+# URL Validation
+
+
+def is_valid_youtube_url(url):
+    """Check if URL is a valid YouTube URL"""
+    youtube_patterns = [
+        r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=',
+        r'(?:https?://)?(?:www\.)?youtu\.be/',
+        r'(?:https?://)?(?:www\.)?youtube\.com/embed/',
+        r'(?:https?://)?(?:www\.)?youtube\.com/v/',
+        r'(?:https?://)?m\.youtube\.com/watch\?v=',
+    ]
+
+    for pattern in youtube_patterns:
+        if re.search(pattern, url, re.IGNORECASE):
+            return True
+    return False
 
 # Routes
 
@@ -212,6 +224,10 @@ def download():
     if not url or not option:
         return jsonify({'status': 'error', 'message': 'Missing URL or option'})
 
+    # Validate YouTube URL
+    if not is_valid_youtube_url(url):
+        return jsonify({'status': 'error', 'message': 'Invalid YouTube URL'})
+
     file_path, error = download_youtube(url, option)
     if error:
         return jsonify({'status': 'error', 'message': error})
@@ -222,48 +238,20 @@ def download():
 
 @app.route('/download_file')
 def download_file():
+    """Simplified file download endpoint optimized for mobile"""
     filename = request.args.get('file')
     if not filename:
-        return jsonify({'status': 'error', 'message': 'No file specified'})
+        return jsonify({'status': 'error', 'message': 'No file specified'}), 400
 
-    # First try the exact filename as provided
+    # Construct file path
     file_path = os.path.join(DOWNLOAD_DIR, filename)
 
-    # If not found, try with secure_filename processing
+    # Check if file exists
     if not os.path.exists(file_path):
-        safe_filename = secure_filename(filename)
-        file_path = os.path.join(DOWNLOAD_DIR, safe_filename)
+        return jsonify({'status': 'error', 'message': 'File not found'}), 404
 
-        # If still not found, try to find the file by searching in directory
-        if not os.path.exists(file_path):
-            # Search for files that contain the base name (without extension)
-            base_name = os.path.splitext(filename)[0]
-            extension = os.path.splitext(filename)[1]
-
-            for file in os.listdir(DOWNLOAD_DIR):
-                if base_name.lower() in file.lower() and file.endswith(extension):
-                    file_path = os.path.join(DOWNLOAD_DIR, file)
-                    filename = file  # Update filename to the actual file found
-                    break
-
-            if not os.path.exists(file_path):
-                # List available files for debugging
-                available_files = [f for f in os.listdir(
-                    DOWNLOAD_DIR) if os.path.isfile(os.path.join(DOWNLOAD_DIR, f))]
-                return jsonify({
-                    'status': 'error',
-                    'message': f'File not found: {filename}',
-                    'debug_info': {
-                        'requested_file': filename,
-                        'search_path': file_path,
-                        # Limit to first 10 files
-                        'available_files': available_files[:10]
-                    }
-                })
-
-    # Get file extension and set appropriate MIME type
-    file_ext = os.path.splitext(safe_filename)[1].lower()
-
+    # Determine MIME type based on extension
+    file_ext = os.path.splitext(filename)[1].lower()
     if file_ext == '.mp3':
         mime_type = 'audio/mpeg'
     elif file_ext == '.mp4':
@@ -272,42 +260,33 @@ def download_file():
         mime_type = 'application/octet-stream'
 
     try:
-        # Get user agent to detect mobile browsers
-        user_agent = request.headers.get('User-Agent', '').lower()
-        is_mobile = any(device in user_agent for device in [
-                        'android', 'iphone', 'ipad', 'mobile'])
-
-        # Log the download attempt for debugging
-        print(
-            f"Download attempt - Original filename: {request.args.get('file')}")
-        print(f"Actual file path: {file_path}")
-        print(f"File exists: {os.path.exists(file_path)}")
-        print(f"Is mobile: {is_mobile}")
-
+        # Create response with proper headers for mobile compatibility
         response = send_file(
             file_path,
             mimetype=mime_type,
             as_attachment=True,
-            download_name=filename  # Use the actual filename found
+            download_name=filename
         )
 
-        # Set additional headers for better mobile compatibility
+        # Set headers for better mobile and cross-browser compatibility
         response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
         response.headers['Content-Type'] = mime_type
+        response.headers['Content-Length'] = str(os.path.getsize(file_path))
+        response.headers['Accept-Ranges'] = 'bytes'
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
 
-        # For mobile browsers, set additional headers
-        if is_mobile:
+        # Mobile-specific headers
+        user_agent = request.headers.get('User-Agent', '').lower()
+        if any(device in user_agent for device in ['android', 'iphone', 'ipad', 'mobile']):
             response.headers['Content-Transfer-Encoding'] = 'binary'
             response.headers['X-Content-Type-Options'] = 'nosniff'
 
         return response
 
     except Exception as e:
-        print(f"Error sending file: {e}")
-        return jsonify({'status': 'error', 'message': f'Failed to send file: {e}'})
+        return jsonify({'status': 'error', 'message': f'Download failed: {str(e)}'}), 500
 
 
 @app.route('/file_info')
@@ -315,30 +294,12 @@ def file_info():
     """Get information about a downloaded file"""
     filename = request.args.get('file')
     if not filename:
-        return jsonify({'status': 'error', 'message': 'No file specified'})
+        return jsonify({'status': 'error', 'message': 'No file specified'}), 400
 
-    # First try the exact filename as provided
     file_path = os.path.join(DOWNLOAD_DIR, filename)
 
-    # If not found, try with secure_filename processing
     if not os.path.exists(file_path):
-        safe_filename = secure_filename(filename)
-        file_path = os.path.join(DOWNLOAD_DIR, safe_filename)
-        filename = safe_filename
-
-        # If still not found, try to find the file by searching in directory
-        if not os.path.exists(file_path):
-            base_name = os.path.splitext(filename)[0]
-            extension = os.path.splitext(filename)[1]
-
-            for file in os.listdir(DOWNLOAD_DIR):
-                if base_name.lower() in file.lower() and file.endswith(extension):
-                    file_path = os.path.join(DOWNLOAD_DIR, file)
-                    filename = file
-                    break
-
-            if not os.path.exists(file_path):
-                return jsonify({'status': 'error', 'message': 'File not found'})
+        return jsonify({'status': 'error', 'message': 'File not found'}), 404
 
     try:
         file_size = os.path.getsize(file_path)
@@ -354,83 +315,7 @@ def file_info():
             'whatsapp_compatible': file_size_mb <= (16 if file_ext == '.mp4' else 100)
         })
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to get file info: {e}'})
-
-
-@app.route('/debug/files')
-def debug_files():
-    """Debug route to list all files in downloads directory"""
-    try:
-        if not os.path.exists(DOWNLOAD_DIR):
-            return jsonify({'status': 'error', 'message': 'Downloads directory does not exist'})
-
-        files = []
-        for filename in os.listdir(DOWNLOAD_DIR):
-            file_path = os.path.join(DOWNLOAD_DIR, filename)
-            if os.path.isfile(file_path):
-                file_size = os.path.getsize(file_path)
-                files.append({
-                    'name': filename,
-                    'size_bytes': file_size,
-                    'size_mb': round(file_size / (1024 * 1024), 2)
-                })
-
-        return jsonify({
-            'status': 'success',
-            'download_dir': DOWNLOAD_DIR,
-            'files': files,
-            'total_files': len(files)
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
-
-
-@app.route('/find_file')
-def find_file():
-    """Find a file by partial name match - useful when exact filename matching fails"""
-    search_term = request.args.get('name')
-    if not search_term:
-        return jsonify({'status': 'error', 'message': 'No search term provided'})
-
-    try:
-        if not os.path.exists(DOWNLOAD_DIR):
-            return jsonify({'status': 'error', 'message': 'Downloads directory does not exist'})
-
-        # Remove file extension for searching
-        search_base = os.path.splitext(search_term)[0].lower()
-        search_ext = os.path.splitext(search_term)[1].lower()
-
-        matches = []
-        for filename in os.listdir(DOWNLOAD_DIR):
-            file_path = os.path.join(DOWNLOAD_DIR, filename)
-            if os.path.isfile(file_path):
-                file_base = os.path.splitext(filename)[0].lower()
-                file_ext = os.path.splitext(filename)[1].lower()
-
-                # Match if base name contains search term and extension matches
-                if search_base in file_base and (not search_ext or file_ext == search_ext):
-                    file_size = os.path.getsize(file_path)
-                    matches.append({
-                        'filename': filename,
-                        'size_mb': round(file_size / (1024 * 1024), 2),
-                        'extension': file_ext
-                    })
-
-        if matches:
-            # Return the best match (first one found)
-            return jsonify({
-                'status': 'success',
-                'filename': matches[0]['filename'],
-                'all_matches': matches
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'No files found matching: {search_term}'
-            })
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': f'Failed to get file info: {str(e)}'}), 500
 
 
 if __name__ == '__main__':
